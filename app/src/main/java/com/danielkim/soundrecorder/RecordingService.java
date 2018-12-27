@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioFormat;
 import android.media.MediaRecorder;
 import android.os.Environment;
 import android.os.IBinder;
@@ -30,11 +31,25 @@ import java.util.TimerTask;
 public class RecordingService extends Service {
 
     private static final String LOG_TAG = "RecordingService";
+    private static final boolean isMediaRecorder = false;
+
+    private Integer mARecorderBits   = AudioFormat.ENCODING_PCM_16BIT;
+//  private Integer mARecorderChans  = AudioFormat.CHANNEL_IN_MONO;
+    private Integer mARecorderChans  = AudioFormat.CHANNEL_IN_STEREO;
+    private Integer mARecorderSource = MediaRecorder.AudioSource.MIC;
+//  private Integer mARecorderSource = MediaRecorder.AudioSource.CAMCORDER;
+//  private Integer mARecorderSource = MediaRecorder.AudioSource.VOICE_RECOGNITION;
+//  private Integer mARecorderSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+
+//  private Integer mARecorderSamplerate  = 44100;
+    private Integer mARecorderSamplerate  = 48000;
+
 
     private String mFileName = null;
     private String mFilePath = null;
 
     private MediaRecorder mRecorder = null;
+    private AudioRecorderT mARecorder = null;
 
     private DBHelper mDatabase;
 
@@ -70,38 +85,61 @@ public class RecordingService extends Service {
 
     @Override
     public void onDestroy() {
-        if (mRecorder != null) {
-            stopRecording();
-        }
-
+        if ( mRecorder != null || mARecorder != null ) {
+                stopRecording();
+         }
         super.onDestroy();
     }
 
     public void startRecording() {
         setFileNameAndPath();
 
-        mRecorder = new MediaRecorder();
-        mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mRecorder.setOutputFile(mFilePath);
-        mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        mRecorder.setAudioChannels(1);
-        if (MySharedPreferences.getPrefHighQuality(this)) {
+        if( isMediaRecorder == true){
+            mRecorder = new MediaRecorder();
+            mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            mRecorder.setOutputFile(mFilePath);
+            mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            //mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.VORBIS);
+            //mRecorder.setAudioChannels(1);
+            mRecorder.setAudioChannels(2);
             mRecorder.setAudioSamplingRate(44100);
             mRecorder.setAudioEncodingBitRate(192000);
-        }
 
-        try {
-            mRecorder.prepare();
-            mRecorder.start();
+            if (MySharedPreferences.getPrefHighQuality(this)) {
+                mRecorder.setAudioSamplingRate(44100);
+                mRecorder.setAudioEncodingBitRate(192000);
+            }
+
+            try {
+                mRecorder.prepare();
+                mRecorder.start();
+                mStartingTimeMillis = System.currentTimeMillis();
+
+                //startTimer();
+                //startForeground(1, createNotification());
+
+            } catch (IOException e) {
+                Log.e(LOG_TAG, "prepare() failed");
+            }
+        }else{
+            mARecorder = AudioRecorderT.getInstance();
+            mARecorder.setAudioEncoding(mARecorderBits);
+            mARecorder.setAudioSource(mARecorderSource);
+            mARecorder.setChannelConfig(mARecorderChans);
+
+            mARecorder.setFrequence(mARecorderSamplerate);
+            mARecorder.setFilePath(mFilePath);
+
+            mARecorder.startRecordAndFile();
             mStartingTimeMillis = System.currentTimeMillis();
 
+            String fullFileName = mARecorder.getFileName();
+            mFileName = fullFileName.substring(fullFileName.lastIndexOf("/")+1, fullFileName.length());
+            mFilePath += mFileName;
             //startTimer();
             //startForeground(1, createNotification());
-
-        } catch (IOException e) {
-            Log.e(LOG_TAG, "prepare() failed");
-        }
+          }
     }
 
     public void setFileNameAndPath(){
@@ -114,25 +152,41 @@ public class RecordingService extends Service {
             mFileName = getString(R.string.default_file_name)
                     + "_" + (mDatabase.getCount() + count) + ".mp4";
             mFilePath = Environment.getExternalStorageDirectory().getAbsolutePath();
-            mFilePath += "/SoundRecorder/" + mFileName;
+            //mFilePath += "/DolbyTest/" + mFileName;
+            //mFilePath += "/DolbyTest/recorders/";
+            mFilePath += "/SoundRecorder/";
 
             f = new File(mFilePath);
         }while (f.exists() && !f.isDirectory());
     }
 
     public void stopRecording() {
-        mRecorder.stop();
-        mElapsedMillis = (System.currentTimeMillis() - mStartingTimeMillis);
-        mRecorder.release();
-        Toast.makeText(this, getString(R.string.toast_recording_finish) + " " + mFilePath, Toast.LENGTH_LONG).show();
+        if( isMediaRecorder == true) {
+            mRecorder.stop();
+            mElapsedMillis = (System.currentTimeMillis() - mStartingTimeMillis);
+            mRecorder.release();
+            Toast.makeText(this, getString(R.string.toast_recording_finish) + " " + mFilePath, Toast.LENGTH_LONG).show();
 
-        //remove notification
-        if (mIncrementTimerTask != null) {
-            mIncrementTimerTask.cancel();
-            mIncrementTimerTask = null;
+            //remove notification
+            if (mIncrementTimerTask != null) {
+                mIncrementTimerTask.cancel();
+                mIncrementTimerTask = null;
+            }
+
+            mRecorder = null;
+        }else {
+            mARecorder.stopRecordAndFile();
+            mElapsedMillis = (System.currentTimeMillis() - mStartingTimeMillis);
+            Toast.makeText(this, getString(R.string.toast_recording_finish) + " " + mFilePath, Toast.LENGTH_LONG).show();
+
+            //remove notification
+            if (mIncrementTimerTask != null) {
+                mIncrementTimerTask.cancel();
+                mIncrementTimerTask = null;
+            }
+
+            mARecorder = null;
         }
-
-        mRecorder = null;
 
         try {
             mDatabase.addRecording(mFileName, mFilePath, mElapsedMillis);

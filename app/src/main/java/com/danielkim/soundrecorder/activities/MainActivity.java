@@ -101,4 +101,10 @@ public class MainActivity extends ActionBarActivity{
 
     public MainActivity() {
     }
+
+    @Override
+    public void onBackPressed() {
+
+    }
+
 }
